@@ -5,7 +5,7 @@ import plotly.graph_objs as go
 from keras.models import load_model
 from sklearn.preprocessing import MinMaxScaler
 
-from xgboost_pred import Time2Vector, SingleAttention, MultiAttention, TransformerEncoder
+from transformer_pred import Time2Vector, SingleAttention, MultiAttention, TransformerEncoder
 
 app = dash.Dash()
 server = app.server
