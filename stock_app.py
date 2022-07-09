@@ -16,16 +16,13 @@ import numpy as np
 from binance_data import get_binance_data
 
 lstm_model = load_model("saved_lstm_model.h5")
-xgboost_model = load_model("saved_rnn_model.h5")
+rnn_model = load_model("saved_rnn_model.h5")
 
 transform_model = load_model('Transformer+TimeEmbedding.hdf5',
                              custom_objects={'Time2Vector': Time2Vector,
                                              'SingleAttention': SingleAttention,
                                              'MultiAttention': MultiAttention,
                                              'TransformerEncoder': TransformerEncoder})
-
-# xgboost_model = XGBRegressor(objective='reg:squarederror', n_estimators=1000)
-# xgboost_model.load_model('xgboost.model')
 
 
 app.layout = html.Div([
@@ -43,23 +40,38 @@ app.layout = html.Div([
     Output('chart-data', 'figure'),
     [Input('my-interval', 'n_intervals')])
 def display_output(n):
-    new_data1 = pd.DataFrame(get_binance_data(True), columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume'])
 
-    new_data1["Time"] = pd.to_datetime(new_data1['Time'], unit='ms')
+    full_data = pd.DataFrame(get_binance_data(True), columns=['Time', 'Open', 'High', 'Low', 'Close', 'Volume'])
+    full_data["Time"] = pd.to_datetime(full_data['Time'], unit='ms')
 
-    new_dataset = pd.DataFrame(index=range(0, len(new_data1)), columns=['Time', 'Close'])
 
-    for i in range(0, len(new_data1)):
-        new_dataset["Time"][i] = new_data1['time'][i]
-        new_dataset["Close"][i] = new_data1["price"][i]
+    new_dataset = pd.DataFrame(index=range(0, len(full_data)), columns=['Time', 'Close'])
+
+    for i in range(0, len(full_data)):
+        new_dataset["Time"][i] = full_data['Time'][i]
+        new_dataset["Close"][i] = full_data["Close"][i]
     # new_data = pd.DataFrame(get_binance_data(), columns=['Time', 'Close'])
 
-    new_data1.index = new_data1.Time
-    new_data1.drop("Time", axis=1, inplace=True)
-    dataset = new_data1.values
+    full_data['Open'] = pd.to_numeric(full_data['Open']).pct_change()  # Create arithmetic returns column
+    full_data['High'] = pd.to_numeric(full_data['High']).pct_change()  # Create arithmetic returns column
+    full_data['Low'] = pd.to_numeric(full_data['Low']).pct_change()  # Create arithmetic returns column
+    full_data['Close'] = pd.to_numeric(full_data['Close']).pct_change()  # Create arithmetic returns column
+    full_data['Volume'] = pd.to_numeric(full_data['Volume']).pct_change()  # Create arithmetic returns column
+
+    full_data.drop(columns=['Time'], inplace=True)
+    train_data = full_data.values
+
+    X_train, y_train = [], []
+    for i in range(window_size, len(train_data)):
+        X_train.append(train_data[i - window_size:i])
+    X_train = np.array(X_train)[-1280:]
+
+    new_dataset.index = new_dataset.Time
+    new_dataset.drop("Time", axis=1, inplace=True)
+    dataset = new_dataset.values
 
     scaler = MinMaxScaler(feature_range=(0, 1))
-    scaler.fit_transform(new_dataset)
+    scaler.fit_transform(dataset)
 
     inputs = new_dataset[window_size:].values
     inputs = inputs.reshape(-1, 1)
@@ -71,11 +83,10 @@ def display_output(n):
     ])
     X_input = np.reshape(X_input, (X_input.shape[0], X_input.shape[1], 1))
 
-    transform_closing_price = transform_model.predict(X_input)
-    transform_closing_price = scaler.inverse_transform(transform_closing_price)
+    transform_closing_price = transform_model.predict(X_train)
 
-    xgboost_closing_price = xgboost_model.predict(X_input)
-    xgboost_closing_price = scaler.inverse_transform(xgboost_closing_price)
+    rnn_closing_price = rnn_model.predict(X_input)
+    rnn_closing_price = scaler.inverse_transform(rnn_closing_price)
 
     lstm_closing_price = lstm_model.predict(X_input)
     lstm_closing_price = scaler.inverse_transform(lstm_closing_price)
@@ -83,8 +94,8 @@ def display_output(n):
     valid = new_dataset[160:]
 
     valid['LSTMPredictions'] = lstm_closing_price
-    valid['XGBoostPredictions'] = xgboost_closing_price
-    valid['TransformPredictions'] = transform_closing_price
+    valid['RNNPrediction'] = rnn_closing_price
+    valid['TransformerPrediction'] = transform_closing_price
     xCol = valid.index
 
     return {
@@ -102,9 +113,15 @@ def display_output(n):
                 mode='lines'
             ),
             go.Scatter(
-                name='XGBoostPredictions',
+                name='RNNPrediction',
                 x=xCol,
-                y=valid["XGBoostPredictions"],
+                y=valid["RNNPrediction"],
+                mode='lines'
+            ),
+            go.Scatter(
+                name='TransformerPrediction',
+                x=xCol,
+                y=valid["TransformerPrediction"],
                 mode='lines'
             )
         ],
